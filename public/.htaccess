@@ -23,3 +23,14 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+# ── Security: block direct access to sensitive files (VULN-01 / VULN-19) ──────
+<FilesMatch "^\.env">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+<FilesMatch "\.(log|sqlite|pem|key|crt|p12|pfx)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

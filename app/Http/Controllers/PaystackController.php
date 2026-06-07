@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Order;
-use App\Models\Payment;
 use App\Notifications\PaymentConfirmedNotification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PaystackController extends Controller
 {
@@ -30,27 +32,32 @@ class PaystackController extends Controller
 
         $user = auth()->user();
 
+        // Use a cryptographically random reference — not predictable from order ID or time
+        $reference = 'LASU-' . strtoupper(Str::random(24));
+
         $response = $this->paystackPost('/transaction/initialize', [
             'email'        => $user->email,
-            'amount'       => (int) ($order->total_amount * 100), // Paystack uses kobo
-            'reference'    => 'LASU-PAY-' . $order->id . '-' . time(),
+            'amount'       => (int) ($order->total_amount * 100),
+            'reference'    => $reference,
             'callback_url' => route('payment.callback'),
             'metadata'     => [
-                'order_id'   => $order->id,
+                'order_id'    => $order->id,
                 'order_number'=> $order->order_number,
-                'buyer_name' => $user->name,
+                'buyer_name'  => $user->name,
             ],
         ]);
 
-        if (!$response || !$response['status']) {
+        if (!$response || !($response['status'] ?? false)) {
+            Log::error('Paystack initiate failed', ['order_id' => $order->id, 'response' => $response]);
             return back()->with('error', 'Could not initiate payment. Please try again.');
         }
 
-        // Update payment record with reference
         $order->payment()->updateOrCreate(
             ['order_id' => $order->id],
             ['provider_reference' => $response['data']['reference'], 'status' => 'pending']
         );
+
+        Log::info('Payment initiated', ['order_id' => $order->id, 'reference' => $reference, 'user_id' => $user->id]);
 
         return redirect($response['data']['authorization_url']);
     }
@@ -62,13 +69,15 @@ class PaystackController extends Controller
     {
         $reference = $request->query('reference') ?? $request->query('trxref');
 
-        if (!$reference) {
+        if (!$reference || !preg_match('/^LASU-[A-Z0-9]{24}$/', $reference)) {
+            Log::warning('Payment callback with invalid reference', ['reference' => $reference, 'ip' => $request->ip()]);
             return redirect()->route('buyer.orders.index')->with('error', 'Invalid payment reference.');
         }
 
-        $response = $this->paystackGet('/transaction/verify/' . $reference);
+        $response = $this->paystackGet('/transaction/verify/' . rawurlencode($reference));
 
-        if (!$response || $response['data']['status'] !== 'success') {
+        if (!$response || ($response['data']['status'] ?? '') !== 'success') {
+            Log::warning('Payment verification failed', ['reference' => $reference]);
             return redirect()->route('buyer.orders.index')->with('error', 'Payment verification failed.');
         }
 
@@ -82,12 +91,11 @@ class PaystackController extends Controller
      */
     public function webhook(Request $request): Response
     {
-        // Verify webhook signature
         $signature = $request->header('x-paystack-signature');
         $hash      = hash_hmac('sha512', $request->getContent(), $this->secretKey);
 
-        if (!hash_equals($hash, $signature ?? '')) {
-            Log::warning('Invalid Paystack webhook signature');
+        if (!$signature || !hash_equals($hash, $signature)) {
+            Log::warning('Invalid Paystack webhook signature', ['ip' => $request->ip()]);
             return response('Unauthorized', 401);
         }
 
@@ -102,83 +110,113 @@ class PaystackController extends Controller
 
     /**
      * Shared logic to mark order paid after successful Paystack response.
+     * Wrapped in a DB transaction with a row lock to prevent race conditions.
      */
     private function fulfillPayment(array $data): void
     {
         $orderId = $data['metadata']['order_id'] ?? null;
-        if (!$orderId) return;
+        if (!$orderId) {
+            Log::error('fulfillPayment called without order_id in metadata', ['data' => $data]);
+            return;
+        }
 
-        $order = Order::find($orderId);
-        if (!$order || $order->payment_status === 'paid') return;
+        DB::transaction(function () use ($data, $orderId) {
+            // Lock the order row to prevent concurrent double-fulfillment (VULN-03)
+            $order = Order::lockForUpdate()->find($orderId);
 
-        $payment = $order->payment;
-        if (!$payment) return;
+            if (!$order) {
+                Log::error('fulfillPayment: order not found', ['order_id' => $orderId]);
+                return;
+            }
 
-        $payment->update([
-            'status'          => 'success',
-            'provider_reference' => $data['reference'],
-            'amount'          => $data['amount'] / 100,
-            'gateway_payload' => $data,
-            'paid_at'         => now(),
-        ]);
+            if ($order->payment_status === 'paid') {
+                return;
+            }
 
-        $order->update([
-            'payment_status' => 'paid',
-            'order_status'   => 'confirmed',
-            'paid_at'        => now(),
-            'confirmed_at'   => now(),
-        ]);
+            // Verify the amount paid matches the order total (VULN-02)
+            $paidAmount = ($data['amount'] ?? 0) / 100;
+            if (abs($paidAmount - (float) $order->total_amount) > 0.01) {
+                Log::critical('Payment amount mismatch — possible fraud', [
+                    'order_id'     => $order->id,
+                    'order_total'  => $order->total_amount,
+                    'paid_amount'  => $paidAmount,
+                    'reference'    => $data['reference'] ?? null,
+                ]);
+                return;
+            }
 
-        // Notify buyer and seller
-        $order->buyer->notify(new PaymentConfirmedNotification($order));
-        $order->seller->notify(new PaymentConfirmedNotification($order));
+            $payment = $order->payment;
+            if (!$payment) {
+                Log::error('fulfillPayment: no payment record for order', ['order_id' => $orderId]);
+                return;
+            }
+
+            $payment->update([
+                'status'             => 'success',
+                'provider_reference' => $data['reference'],
+                'amount'             => $paidAmount,
+                'gateway_payload'    => $data,
+                'paid_at'            => now(),
+            ]);
+
+            $order->update([
+                'payment_status' => 'paid',
+                'order_status'   => 'confirmed',
+                'paid_at'        => now(),
+                'confirmed_at'   => now(),
+            ]);
+
+            Log::info('Payment fulfilled', [
+                'order_id'  => $order->id,
+                'amount'    => $paidAmount,
+                'reference' => $data['reference'] ?? null,
+            ]);
+
+            $order->buyer->notify(new PaymentConfirmedNotification($order));
+            $order->seller->notify(new PaymentConfirmedNotification($order));
+        });
     }
 
     /**
-     * POST request to Paystack API.
+     * POST request to Paystack API via Laravel HTTP client (proper TLS, no raw cURL). (VULN-05)
      */
     private function paystackPost(string $endpoint, array $data): ?array
     {
         try {
-            $ch = curl_init($this->baseUrl . $endpoint);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST           => true,
-                CURLOPT_POSTFIELDS     => json_encode($data),
-                CURLOPT_HTTPHEADER     => [
-                    'Authorization: Bearer ' . $this->secretKey,
-                    'Content-Type: application/json',
-                    'Cache-Control: no-cache',
-                ],
-            ]);
-            $result = curl_exec($ch);
-            curl_close($ch);
-            return json_decode($result, true);
+            $response = Http::withToken($this->secretKey)
+                ->acceptJson()
+                ->post($this->baseUrl . $endpoint, $data);
+
+            if ($response->failed()) {
+                Log::error('Paystack POST failed', ['endpoint' => $endpoint, 'status' => $response->status()]);
+                return null;
+            }
+
+            return $response->json();
         } catch (\Throwable $e) {
-            Log::error('Paystack POST error: ' . $e->getMessage());
+            Log::error('Paystack POST error: ' . $e->getMessage(), ['endpoint' => $endpoint]);
             return null;
         }
     }
 
     /**
-     * GET request to Paystack API.
+     * GET request to Paystack API via Laravel HTTP client (proper TLS, no raw cURL). (VULN-05)
      */
     private function paystackGet(string $endpoint): ?array
     {
         try {
-            $ch = curl_init($this->baseUrl . $endpoint);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER     => [
-                    'Authorization: Bearer ' . $this->secretKey,
-                    'Cache-Control: no-cache',
-                ],
-            ]);
-            $result = curl_exec($ch);
-            curl_close($ch);
-            return json_decode($result, true);
+            $response = Http::withToken($this->secretKey)
+                ->acceptJson()
+                ->get($this->baseUrl . $endpoint);
+
+            if ($response->failed()) {
+                Log::error('Paystack GET failed', ['endpoint' => $endpoint, 'status' => $response->status()]);
+                return null;
+            }
+
+            return $response->json();
         } catch (\Throwable $e) {
-            Log::error('Paystack GET error: ' . $e->getMessage());
+            Log::error('Paystack GET error: ' . $e->getMessage(), ['endpoint' => $endpoint]);
             return null;
         }
     }

@@ -26,6 +26,8 @@ class CartController extends Controller
     public function add(Request $request, Listing $listing): RedirectResponse|JsonResponse
     {
         abort_unless($listing->isAvailable(), 422, 'This item is no longer available.');
+        // Prevent a seller from purchasing their own listing (VULN-09)
+        abort_if($listing->user_id === auth()->id(), 422, 'You cannot add your own listing to the cart.');
 
         $request->validate([
             'quantity' => ['integer', 'min:1', 'max:' . $listing->stock_quantity],

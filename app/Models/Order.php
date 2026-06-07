@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -70,8 +71,9 @@ class Order extends Model
     }
 
     // ── Static helpers ─────────────────────────────────────────────────────────
+    // Use a UUID so order numbers are not enumerable (VULN-13)
     public static function generateOrderNumber(): string
     {
-        return 'LASU-' . strtoupper(uniqid());
+        return 'LASU-' . strtoupper(str_replace('-', '', Str::uuid()));
     }
 }

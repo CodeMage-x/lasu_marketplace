@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\ProfileController;
 use App\Http\Controllers\Auth\RegisterController;
@@ -34,9 +35,9 @@ Route::get('/stores/{store:slug}', [SellerStoreController::class, 'show'])->name
 // ── Auth routes ────────────────────────────────────────────────────────────────
 Route::middleware('guest')->group(function () {
     Route::get('/register', [RegisterController::class, 'create'])->name('register');
-    Route::post('/register', [RegisterController::class, 'store']);
+    Route::post('/register', [RegisterController::class, 'store'])->middleware('throttle:5,1');
     Route::get('/login', [LoginController::class, 'create'])->name('login');
-    Route::post('/login', [LoginController::class, 'store']);
+    Route::post('/login', [LoginController::class, 'store'])->middleware('throttle:5,1');
 });
 
 Route::post('/logout', [LoginController::class, 'destroy'])->name('logout')->middleware('auth');
@@ -85,6 +86,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Reports
     Route::post('/reports', [ReportController::class, 'store'])->name('reports.store');
+
+    // Private attachment download — checks conversation membership (VULN-21)
+    Route::get('/attachments/{message}', [AttachmentController::class, 'download'])->name('attachments.download');
 
     // ── Buyer routes ───────────────────────────────────────────────────────────
     Route::prefix('cart')->name('cart.')->group(function () {
@@ -168,7 +172,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 });
 
-// Paystack webhook (no auth — verified by signature)
+// Paystack webhook — no auth, CSRF exempted via withoutMiddleware, verified by HMAC signature (VULN-19)
 Route::post('/webhooks/paystack', [PaystackController::class, 'webhook'])
     ->name('webhooks.paystack')
-    ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
+    ->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+
+// Health check — internal networks only (VULN-19)
+Route::get('/up', function () {
+    return response('OK', 200);
+})->middleware('internal.only');

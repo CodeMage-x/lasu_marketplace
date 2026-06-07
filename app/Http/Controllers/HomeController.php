@@ -58,7 +58,7 @@ class HomeController extends Controller
         }
 
         // Sort
-        $sort = $request->get('sort', 'newest');
+        $sort = $request->query('sort', 'newest');
         match ($sort) {
             'price_asc'  => $query->orderBy('price', 'asc'),
             'price_desc' => $query->orderBy('price', 'desc'),
@@ -73,8 +73,12 @@ class HomeController extends Controller
 
     public function show(Listing $listing): View
     {
-        // Increment view count
-        $listing->increment('view_count');
+        // Only count one view per session per listing to prevent inflation (VULN-10)
+        $sessionKey = 'viewed_listing_' . $listing->id;
+        if (!session()->has($sessionKey)) {
+            $listing->increment('view_count');
+            session()->put($sessionKey, true);
+        }
 
         $listing->load(['images', 'store.user', 'category', 'campusZone']);
 

@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Buyer;
 
 use App\Http\Controllers\Controller;
-use App\Models\CartItem;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -60,7 +59,22 @@ class OrderController extends Controller
         DB::transaction(function () use ($bySeller, $user, $request, &$createdOrders) {
             foreach ($bySeller as $sellerId => $items) {
                 $seller   = $items->first()->listing->store->user;
-                $subtotal = $items->sum(fn ($i) => $i->quantity * $i->listing->price);
+                $subtotal = 0;
+
+                // Lock listing rows to prevent concurrent oversell (VULN-11)
+                $listingIds = $items->pluck('listing_id')->all();
+                $lockedListings = \App\Models\Listing::lockForUpdate()
+                    ->whereIn('id', $listingIds)
+                    ->get()
+                    ->keyBy('id');
+
+                foreach ($items as $item) {
+                    $listing = $lockedListings->get($item->listing_id);
+                    if (!$listing || $listing->stock_quantity < $item->quantity) {
+                        throw new \RuntimeException("Insufficient stock for \"{$item->listing->title}\".");
+                    }
+                    $subtotal += $item->quantity * $listing->price;
+                }
 
                 $order = Order::create([
                     'order_number'        => Order::generateOrderNumber(),
@@ -75,20 +89,22 @@ class OrderController extends Controller
                 ]);
 
                 foreach ($items as $item) {
+                    $listing = $lockedListings->get($item->listing_id);
+
                     OrderItem::create([
                         'order_id'                => $order->id,
                         'listing_id'              => $item->listing_id,
                         'quantity'                => $item->quantity,
-                        'unit_price'              => $item->listing->price,
-                        'subtotal'                => $item->quantity * $item->listing->price,
-                        'listing_title_snapshot'  => $item->listing->title,
-                        'listing_price_snapshot'  => $item->listing->price,
+                        'unit_price'              => $listing->price,
+                        'subtotal'                => $item->quantity * $listing->price,
+                        'listing_title_snapshot'  => $listing->title,
+                        'listing_price_snapshot'  => $listing->price,
                     ]);
 
-                    // Decrement stock
-                    $item->listing->decrement('stock_quantity', $item->quantity);
-                    if ($item->listing->stock_quantity <= 0) {
-                        $item->listing->update(['availability' => 'out_of_stock']);
+                    // Decrement stock atomically inside the lock
+                    $listing->decrement('stock_quantity', $item->quantity);
+                    if ($listing->stock_quantity - $item->quantity <= 0) {
+                        $listing->update(['availability' => 'out_of_stock']);
                     }
                 }
 
@@ -113,8 +129,6 @@ class OrderController extends Controller
             // Clear cart
             $user->cartItems()->delete();
         });
-
-        $orderIds = collect($createdOrders)->pluck('id')->implode(',');
 
         if ($request->payment_method === 'online' && count($createdOrders) === 1) {
             return redirect()->route('payment.initiate', $createdOrders[0]->id);

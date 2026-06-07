@@ -41,13 +41,19 @@ class UserController extends Controller
     public function suspend(User $user): RedirectResponse
     {
         abort_if($user->isAdmin(), 403, 'Cannot suspend an admin account.');
-        $user->update(['status' => 'suspended']);
+        // Direct property assignment — status is excluded from $fillable (VULN-16)
+        $user->status = 'suspended';
+        $user->save();
         return back()->with('success', "User {$user->name} has been suspended.");
     }
 
     public function activate(User $user): RedirectResponse
     {
-        $user->update(['status' => 'active']);
+        // Prevent re-activating another admin without super-admin privilege (VULN-22)
+        abort_if($user->isAdmin() && !auth()->user()->isAdmin(), 403, 'Cannot change status of an admin account.');
+        // Direct property assignment — status is excluded from $fillable (VULN-16)
+        $user->status = 'active';
+        $user->save();
         return back()->with('success', "User {$user->name} has been activated.");
     }
 

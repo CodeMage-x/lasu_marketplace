@@ -41,13 +41,18 @@ class RegisterController extends Controller
             'name'       => $request->name,
             'email'      => $request->email,
             'edu_email'  => $request->edu_email,
-            'role'       => $request->role,
             'faculty'    => $request->faculty,
             'department' => $request->department,
             'phone'      => $request->phone,
             'password'   => Hash::make($request->password),
-            'status'     => 'active',
         ]);
+
+        // role and status are excluded from $fillable to prevent mass-assignment;
+        // set them explicitly via forceFill (VULN-16)
+        $user->forceFill([
+            'role'   => $request->role, // validated above to 'buyer' or 'seller' only
+            'status' => 'active',
+        ])->save();
 
         event(new Registered($user));
 

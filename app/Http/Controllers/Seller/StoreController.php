@@ -26,10 +26,17 @@ class StoreController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        /** @var \App\Models\User $user */
         $user = auth()->user();
 
         if ($user->store) {
             return redirect()->route('seller.store.show')->with('info', 'You already have a store.');
+        }
+
+        // Sellers must have a verified LASU institutional email before opening a store (VULN-15)
+        if (!$user->edu_email) {
+            return redirect()->route('profile.edit')
+                ->with('error', 'You must add and verify your LASU institutional email (@lasu.edu.ng) before creating a store.');
         }
 
         $request->validate([

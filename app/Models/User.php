@@ -14,8 +14,10 @@ class User extends Authenticatable implements MustVerifyEmail
 {
     use HasFactory, Notifiable, SoftDeletes;
 
+    // role and status are intentionally excluded — use forceFill() or direct
+    // property assignment in the few places that legitimately set them (VULN-16)
     protected $fillable = [
-        'name', 'email', 'edu_email', 'password', 'role', 'status',
+        'name', 'email', 'edu_email', 'password',
         'faculty', 'department', 'phone', 'avatar', 'is_external_login', 'last_login_at',
     ];
 
@@ -89,11 +91,37 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     // ── Accessors ──────────────────────────────────────────────────────────────
+
+    /**
+     * Return avatar URL — generate a local SVG data-URI for users without a custom avatar
+     * instead of leaking the user's name to an external service (VULN-12).
+     */
     public function getAvatarUrlAttribute(): string
     {
-        return $this->avatar
-            ? asset('storage/' . $this->avatar)
-            : 'https://ui-avatars.com/api/?name=' . urlencode($this->name) . '&background=16a34a&color=fff';
+        if ($this->avatar) {
+            return asset('storage/' . $this->avatar);
+        }
+
+        // Derive two initials from the name
+        $words    = preg_split('/\s+/', trim($this->name));
+        $initials = strtoupper(
+            count($words) >= 2
+                ? substr($words[0], 0, 1) . substr($words[1], 0, 1)
+                : substr($words[0], 0, 2)
+        );
+
+        // Deterministic background colour based on name (no external request)
+        $colours  = ['0a6640', '1d4ed8', '7c3aed', 'b45309', 'be185d', '0e7490', '166534'];
+        $colour   = $colours[abs(crc32($this->name)) % count($colours)];
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
+             . '<rect width="64" height="64" fill="#' . $colour . '"/>'
+             . '<text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" '
+             . 'fill="#fff" font-size="26" font-family="sans-serif" font-weight="bold">'
+             . htmlspecialchars($initials, ENT_XML1)
+             . '</text></svg>';
+
+        return 'data:image/svg+xml;base64,' . base64_encode($svg);
     }
 
     public function getAverageRatingAttribute(): float

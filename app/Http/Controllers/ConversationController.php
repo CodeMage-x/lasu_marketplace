@@ -108,7 +108,8 @@ class ConversationController extends Controller
         ];
 
         if ($request->hasFile('attachment')) {
-            $data['attachment_path'] = $request->file('attachment')->store('messages/attachments', 'public');
+            // Store on the private local disk — served only via authenticated AttachmentController (VULN-21)
+            $data['attachment_path'] = $request->file('attachment')->store('messages/attachments', 'local');
             $data['type']            = 'media';
         }
 
