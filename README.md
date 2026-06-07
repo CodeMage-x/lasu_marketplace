@@ -1,3 +1,5 @@
+HEAD
+
 # LASU Marketplace
 
 A verified campus e-commerce platform for Lagos State University (LASU) students and entrepreneurs. Built with Laravel 13, Bootstrap 5, and Paystack.
@@ -23,13 +25,13 @@ A verified campus e-commerce platform for Lagos State University (LASU) students
 
 Make sure you have the following installed before you begin:
 
-| Tool | Minimum Version |
-|------|----------------|
-| PHP | 8.2+ |
-| Composer | 2.x |
-| MySQL | 8.0+ |
-| Node.js | 18+ |
-| NPM | 9+ |
+| Tool     | Minimum Version |
+| -------- | --------------- |
+| PHP      | 8.2+            |
+| Composer | 2.x             |
+| MySQL    | 8.0+            |
+| Node.js  | 18+             |
+| NPM      | 9+              |
 
 ---
 
@@ -139,6 +141,7 @@ php artisan db:seed
 ```
 
 This creates:
+
 - 10 campus zones (real LASU locations)
 - 10 product categories
 - 1 admin account
@@ -177,27 +180,27 @@ All sample accounts use the password: **`password`**
 
 ### Admin
 
-| Field | Value |
-|-------|-------|
-| Email | admin@lasu.edu.ng |
-| Password | password |
-| Access | Full admin panel at `/admin/dashboard` |
+| Field    | Value                                  |
+| -------- | -------------------------------------- |
+| Email    | admin@lasu.edu.ng                      |
+| Password | password                               |
+| Access   | Full admin panel at `/admin/dashboard` |
 
 ### Sellers
 
-| Name | Email | Store |
-|------|-------|-------|
-| Amara Books | amara@lasu.edu.ng | Amara Books & Stationery |
-| Chidi Tech Store | chidi@lasu.edu.ng | Chidi Tech Hub |
-| Fatima Fashion Hub | fatima@lasu.edu.ng | Fatima's Fashion |
+| Name               | Email              | Store                    |
+| ------------------ | ------------------ | ------------------------ |
+| Amara Books        | amara@lasu.edu.ng  | Amara Books & Stationery |
+| Chidi Tech Store   | chidi@lasu.edu.ng  | Chidi Tech Hub           |
+| Fatima Fashion Hub | fatima@lasu.edu.ng | Fatima's Fashion         |
 
 Sellers log in and are redirected to `/seller/dashboard`
 
 ### Buyers
 
-| Name | Email |
-|------|-------|
-| Emeka Obi | emeka@lasu.edu.ng |
+| Name          | Email             |
+| ------------- | ----------------- |
+| Emeka Obi     | emeka@lasu.edu.ng |
 | Ngozi Adeyemi | ngozi@lasu.edu.ng |
 
 Buyers log in and are redirected to the homepage
@@ -207,6 +210,7 @@ Buyers log in and are redirected to the homepage
 ## Features by Role
 
 ### Buyer
+
 - Browse and search listings by category, price, and condition
 - Add items to cart and adjust quantities
 - Checkout with cash on meetup or online payment (Paystack)
@@ -217,6 +221,7 @@ Buyers log in and are redirected to the homepage
 - Report suspicious listings, users, or stores
 
 ### Seller
+
 - Create and manage a storefront with logo and banner
 - Add listings with up to 5 images, pricing, and stock levels
 - Receive and manage customer orders
@@ -225,6 +230,7 @@ Buyers log in and are redirected to the homepage
 - View dashboard with revenue and order statistics
 
 ### Admin
+
 - View platform-wide stats and activity
 - Verify or suspend seller stores
 - Moderate and remove listings
@@ -297,31 +303,38 @@ php artisan storage:link
 ## Troubleshooting
 
 ### "Class not found" errors
+
 ```bash
 composer dump-autoload
 php artisan optimize:clear
 ```
 
 ### "Table does not exist" errors
+
 ```bash
 php artisan migrate
 ```
 
 ### "View not found" errors
+
 Make sure all blade files are in the correct folder under `resources/views/`. Refer to the project structure above.
 
 ### Images not displaying
+
 ```bash
 php artisan storage:link
 ```
+
 Then confirm your `APP_URL` in `.env` matches the URL you are accessing the app on (e.g. `http://localhost:8000`).
 
 ### Paystack payments not working
+
 - Confirm you are using **test keys** for local development
 - Ensure your `APP_URL` is publicly accessible for webhooks (use [ngrok](https://ngrok.com) to expose localhost during testing)
 - Check that the Paystack webhook URL is set to `https://your-domain.com/webhooks/paystack` in your Paystack dashboard
 
 ### Mail not sending
+
 - Confirm 2-Step Verification is enabled on your Gmail account
 - Make sure you generated an **App Password** (not your regular password)
 - Test with: `php artisan tinker` then `Mail::raw('Test', fn($m) => $m->to('test@example.com')->subject('Test'));`
@@ -330,18 +343,23 @@ Then confirm your `APP_URL` in `.env` matches the URL you are accessing the app 
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Laravel 13 (PHP 8.2+) |
-| Frontend | Blade + Bootstrap 5 + Bootstrap Icons |
-| Database | MySQL 8 |
+| Layer          | Technology                               |
+| -------------- | ---------------------------------------- |
+| Backend        | Laravel 13 (PHP 8.2+)                    |
+| Frontend       | Blade + Bootstrap 5 + Bootstrap Icons    |
+| Database       | MySQL 8                                  |
 | Authentication | Laravel built-in + custom RoleMiddleware |
-| Payments | Paystack API |
-| File Storage | Laravel local disk (public) |
-| Notifications | Laravel database notifications |
+| Payments       | Paystack API                             |
+| File Storage   | Laravel local disk (public)              |
+| Notifications  | Laravel database notifications           |
 
 ---
 
 ## License
 
-This project was developed as an undergraduate research project for Lagos State University.
+# This project was developed as an undergraduate research project for Lagos State University.
+
+# lasu_marketplace
+
+E-marketplace for lasu students and entreprenuers
+fd149d95202f82d51f4b4b30b48f15d6bcf14036
